@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -6,13 +6,11 @@ import {
   emptySubscription,
   FREQUENCIES,
   nextFromStart,
-  nextOccurrence,
 } from "@/lib/domain";
 import { BrandBadge, getBrand, matchBrands } from "@/lib/logos";
 import { CloseButton } from "./close-button";
 import { GlassField, GlassSelect } from "./ui-fields";
 import { useAppStore } from "@/lib/store";
-import { formatDayLong } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import type { CategoryId, Frequency, Subscription } from "@/lib/types";
 
@@ -29,31 +27,20 @@ export function SubForm({
 }) {
   const addSubscription = useAppStore((s) => s.addSubscription);
   const updateSubscription = useAppStore((s) => s.updateSubscription);
-  const formDraft = useAppStore((s) => s.formDraft);
-  const setFormDraft = useAppStore((s) => s.setFormDraft);
   const initial = editing ?? emptySubscription();
-  const draft = !editing && formDraft ? formDraft : null;
-  const [name, setName] = useState(draft?.name ?? initial.name);
-  const [category, setCategory] = useState<CategoryId>((draft?.category as CategoryId) ?? initial.category);
-  const [price, setPrice] = useState(draft?.price ?? String(initial.price || ""));
-  const [frequency, setFrequency] = useState<Frequency>((draft?.frequency as Frequency) ?? initial.frequency);
-  const [startedAt, setStartedAt] = useState(draft?.startedAt ?? (initial.startedAt || initial.nextRenewal));
-  const [brandKey, setBrandKey] = useState(draft?.brandKey ?? initial.brandKey);
-  const [notes, setNotes] = useState(draft?.notes ?? initial.notes);
+  const [name, setName] = useState(initial.name);
+  const [category, setCategory] = useState<CategoryId>(initial.category);
+  const [price, setPrice] = useState(initial.price ? String(initial.price) : "");
+  const [frequency, setFrequency] = useState<Frequency>(initial.frequency);
+  const [startedAt, setStartedAt] = useState(initial.startedAt || initial.nextRenewal);
+  const [brandKey, setBrandKey] = useState(initial.brandKey);
+  const [notes, setNotes] = useState(initial.notes);
   const [more, setMore] = useState(false);
-
-  useEffect(() => {
-    if (editing) return;
-    setFormDraft({ name, category, price, frequency, startedAt, brandKey, notes });
-  }, [editing, name, category, price, frequency, startedAt, brandKey, notes, setFormDraft]);
 
   const suggestions = useMemo(() => matchBrands(name), [name]);
   const brand = getBrand(brandKey);
   const tint = brandKey !== "custom" ? brand.color : "#22d3ee";
   const picked = brandKey !== "custom" || name.trim().length > 0;
-  const previewNext = startedAt
-    ? formatDayLong(nextOccurrence(nextFromStart(startedAt, frequency), frequency))
-    : "—";
 
   const applyPreset = (key: string) => {
     const b = getBrand(key);
@@ -98,20 +85,13 @@ export function SubForm({
       return;
     }
     const id = addSubscription(payload);
-    setFormDraft(null);
     toast.success("Salvato");
     onSaved(id);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <button
-        type="button"
-        className="absolute inset-0 bg-void/45"
-        tabIndex={-1}
-        aria-hidden="true"
-        onClick={onClose}
-      />
+      <button type="button" className="absolute inset-0 bg-void/45" tabIndex={-1} aria-hidden="true" onClick={onClose} />
       <div
         className={`${fromCallout ? "callout-sheet-in" : "sheet-in"} relative z-10 flex max-h-[88%] w-full max-w-[480px] flex-col overflow-hidden rounded-t-xl`}
         style={{
@@ -140,15 +120,12 @@ export function SubForm({
             <CloseButton onClick={onClose} className="absolute right-0 top-0" />
           </div>
         </div>
-
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-[max(12px,env(safe-area-inset-bottom))]">
           <input
             value={name}
             onChange={(e) => {
               setName(e.target.value);
-              if (brandKey !== "custom" && e.target.value !== brand.name) {
-                setBrandKey("custom");
-              }
+              if (brandKey !== "custom" && e.target.value !== brand.name) setBrandKey("custom");
             }}
             placeholder="Cerca Netflix, Spotify…"
             autoComplete="off"
@@ -156,84 +133,43 @@ export function SubForm({
           />
           <div className="no-scrollbar relative mb-3 flex gap-2 overflow-x-auto pb-1">
             {suggestions.slice(0, 12).map((b) => (
-              <button
-                key={b.key}
-                type="button"
-                onClick={() => applyPreset(b.key)}
-                className="glow-tap flex shrink-0 flex-col items-center gap-1 rounded-2xl p-1"
-              >
+              <button key={b.key} type="button" onClick={() => applyPreset(b.key)} className="glow-tap flex shrink-0 flex-col items-center gap-1 rounded-2xl p-1">
                 <BrandBadge brandKey={b.key} size={36} />
               </button>
             ))}
           </div>
-
           <div className="relative grid grid-cols-2 gap-2">
             <div className="rounded-2xl bg-white/6 px-3 py-2">
               <p className="text-[10px] text-muted">Prezzo</p>
-              <input
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                inputMode="decimal"
-                className="mt-0.5 w-full bg-transparent font-display text-sm font-medium outline-none"
-              />
+              <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className="mt-0.5 w-full bg-transparent font-display text-sm font-medium outline-none" />
             </div>
-            <div className="rounded-2xl bg-white/6 px-3 py-2">
-              <p className="text-[10px] text-muted">Prossimo rinnovo</p>
-              <p className="mt-0.5 truncate font-display text-sm font-medium">{previewNext}</p>
-            </div>
+            <GlassField label="Ricorrenza">
+              <GlassSelect value={frequency} onChange={(v) => setFrequency(v as Frequency)} options={FREQUENCIES.map((f) => ({ id: f.id, label: f.label }))} />
+            </GlassField>
           </div>
-
+          <div className="relative mt-2">
+            <GlassField label="Data di attivazione">
+              <div className="relative">
+                <input type="date" value={startedAt} onChange={(e) => setStartedAt(e.target.value)} className="glass-field h-10 w-full appearance-none px-3 pr-10 text-sm [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0" />
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+              </div>
+            </GlassField>
+          </div>
           {more && (
             <div className="relative mt-2 space-y-2">
-              <GlassField label="Frequenza">
-                <GlassSelect
-                  value={frequency}
-                  onChange={(v) => setFrequency(v as Frequency)}
-                  options={FREQUENCIES.map((f) => ({ id: f.id, label: f.label }))}
-                />
-              </GlassField>
-              <GlassField label="Data di attivazione">
-                <div className="relative">
-                  <input
-                    type="date"
-                    value={startedAt}
-                    onChange={(e) => setStartedAt(e.target.value)}
-                    className="glass-field h-10 w-full appearance-none px-3 pr-10 text-sm [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0"
-                  />
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
-                </div>
-              </GlassField>
               <GlassField label="Categoria">
-                <GlassSelect
-                  value={category}
-                  onChange={(v) => setCategory(v as CategoryId)}
-                  options={CATEGORIES}
-                />
+                <GlassSelect value={category} onChange={(v) => setCategory(v as CategoryId)} options={CATEGORIES} />
               </GlassField>
               <GlassField label="Nota">
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={2}
-                  className="glass-field w-full resize-none px-3 py-2 text-sm"
-                />
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="glass-field w-full resize-none px-3 py-2 text-sm" />
               </GlassField>
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={() => setMore((v) => !v)}
-            className="mt-1 flex h-8 w-full items-center justify-center gap-1 text-xs text-muted"
-          >
+          <button type="button" onClick={() => setMore((v) => !v)} className="mt-1 flex h-8 w-full items-center justify-center gap-1 text-xs text-muted">
             Altro
             <ChevronDown className={cn("size-3.5 transition-transform", more && "rotate-180")} />
           </button>
-          <button
-            type="button"
-            onClick={save}
-            className="glow-tap mt-1 h-11 w-full rounded-2xl bg-cyan font-display text-sm font-semibold text-void"
-          >
+          <button type="button" onClick={save} className="glow-tap mt-1 h-11 w-full rounded-2xl bg-cyan font-display text-sm font-semibold text-void">
             Conferma
           </button>
         </div>

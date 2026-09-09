@@ -7,12 +7,9 @@ import { cn } from "@/lib/cn";
 import {
   activeMonthlyTotal,
   computePeriodSpend,
-  duePhrase,
-  upcomingRenewals,
   yearlyProjection,
 } from "@/lib/domain";
 import { formatEuroCompact } from "@/lib/format";
-import { BrandBadge } from "@/lib/logos";
 import { useAppStore } from "@/lib/store";
 import type { Subscription } from "@/lib/types";
 
@@ -50,7 +47,6 @@ export function HomeView({
   );
   const monthly = activeMonthlyTotal(subscriptions);
   const yearly = yearlyProjection(subscriptions);
-  const next3 = useMemo(() => upcomingRenewals(subscriptions, 3), [subscriptions]);
 
   const recurring = useMemo(
     () =>
@@ -100,141 +96,69 @@ export function HomeView({
     <div className="mx-auto flex h-full w-full max-w-[520px] flex-col">
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-36">
         <ScreenHeader onSettings={onSettings} sticky />
-
         <div className="px-5">
         <div data-period-swipe className="relative mx-auto mt-2 flex h-[320px] w-full max-w-[320px] items-center justify-center">
           <ChartBackdrop />
-          <div className="relative h-[236px] w-[236px]">
+          <div className="relative h-[236px] w-[236px] overflow-visible">
           <SpendRing percent={spend.percent} active={active} />
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-7 text-center">
-            <p className="text-[11px] leading-snug text-muted">
-              {period === "month" ? "Mancano ancora questo mese" : "Mancano ancora quest’anno"}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+            <p className="font-display text-[32px] font-semibold tabular-nums leading-none tracking-tight">
+              {formatEuroCompact(spend.paid)}
             </p>
-            <p className="mt-1.5 font-display text-[34px] font-semibold tabular-nums leading-none tracking-tight">
-              {formatEuroCompact(spend.remaining)}
+            <p className="mt-2 text-[11px] leading-snug text-muted">
+              {period === "month" ? "Usciti dal conto questo mese" : "Usciti dal conto quest’anno"}
             </p>
-            <p className="mt-2 text-[11px] tabular-nums text-cyan">
-              già usciti {formatEuroCompact(spend.paid)} · previsti {formatEuroCompact(spend.due)}
+            <p className="mt-1.5 text-[11px] tabular-nums text-cyan">
+              mancano {formatEuroCompact(spend.remaining)}
             </p>
           </div>
           </div>
         </div>
-
         <div className="mt-2 flex justify-center">
           <PeriodSwitch period={period} onChange={setPeriod} live={active} />
         </div>
-
         {empty ? (
           <div className="mt-8 text-center">
             <p className="font-display text-base font-medium">Niente in orbita</p>
             <p className="mt-1 text-sm text-muted">Aggiungi il primo abbonamento. Un minuto.</p>
-            <button
-              type="button"
-              onClick={onAdd}
-              className="glow-tap mt-4 h-12 w-full rounded-2xl bg-cyan font-display text-sm font-semibold text-void"
-            >
+            <button type="button" onClick={onAdd} className="glow-tap mt-4 h-12 w-full rounded-2xl bg-cyan font-display text-sm font-semibold text-void">
               Aggiungi il primo
             </button>
-            <button
-              type="button"
-              onClick={loadDemo3}
-              className="mt-3 text-xs text-muted underline-offset-2 hover:underline"
-            >
+            <button type="button" onClick={loadDemo3} className="mt-3 text-xs text-muted underline-offset-2 hover:underline">
               Oppure carica 3 esempi da buttare
             </button>
           </div>
         ) : (
           <>
-        <div className="mt-5">
-          <p className="mb-2 font-display text-sm font-medium">Prossime scadenze</p>
-          <div className="space-y-1.5">
-            {next3.length === 0 ? (
-              <p className="text-sm text-muted">Nessuna scadenza in vista.</p>
-            ) : (
-              next3.map(({ s }) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => onOpen(s.id)}
-                  className="glow-tap flex w-full items-center gap-2.5 rounded-2xl bg-white/5 px-3 py-2.5 text-left"
-                >
-                  <BrandBadge brandKey={s.brandKey} name={s.name} size={28} />
-                  <span className="min-w-0 flex-1 truncate text-sm">{s.name}</span>
-                  <span className="shrink-0 text-[12px] tabular-nums text-muted">
-                    {formatEuroCompact(s.price)} · {duePhrase(s)}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-
         <div className="mt-5 grid grid-cols-3 gap-2">
-          <Stat
-            label={period === "month" ? "Addebiti mese" : "Addebiti anno"}
-            value={formatEuroCompact(spend.due)}
-          />
+          <Stat label={period === "month" ? "Addebiti mese" : "Addebiti anno"} value={formatEuroCompact(spend.due)} />
           <Stat label="Quota mese" value={formatEuroCompact(monthly)} />
           <Stat label="Quota anno" value={formatEuroCompact(yearly)} />
         </div>
         <p className="mt-2 text-center text-[10px] leading-snug text-muted">
           Addebiti = prelievi veri. Quota = costo spalmato (annuali ÷ 12).
         </p>
-
         <div className="mt-5">
-          <GlowSwitch
-            wide
-            live={active}
-            value={lane}
-            onChange={setLane}
-            options={[
-              { id: "subs", label: "Abbonamenti" },
-              { id: "once", label: "Una tantum" },
-            ]}
-          />
+          <GlowSwitch wide live={active} value={lane} onChange={setLane} options={[{ id: "subs", label: "Abbonamenti" }, { id: "once", label: "Una tantum" }]} />
         </div>
-
         <div className="mt-2 flex justify-end gap-1">
-          {(
-            [
-              ["renewal", "Rinnovo"],
-              ["price", "Prezzo"],
-              ["name", "A–Z"],
-            ] as const
-          ).map(([id, label]) => {
+          {([["renewal", "Rinnovo"], ["price", "Prezzo"], ["name", "A–Z"]] as const).map(([id, label]) => {
             const on = sort === id;
             return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => tapSort(id)}
-                className={cn(
-                  "h-7 rounded-full px-2.5 text-[10px] glow-tap",
-                  on ? "bg-white/10 text-fg" : "text-faint",
-                )}
-              >
-                {label}
-                {on ? (desc ? " ↓" : " ↑") : ""}
+              <button key={id} type="button" onClick={() => tapSort(id)} className={cn("h-7 rounded-full px-2.5 text-[10px] glow-tap", on ? "bg-white/10 text-fg" : "text-faint")}>
+                {label}{on ? (desc ? " ↓" : " ↑") : ""}
               </button>
             );
           })}
         </div>
-
         <div className="mt-2 space-y-2">
           {items.length === 0 ? (
             <p className="pt-8 text-center text-sm text-muted">
-              {lane === "subs"
-                ? "Nessun abbonamento ricorrente."
-                : "Nessun pagamento una tantum."}
+              {lane === "subs" ? "Nessun abbonamento ricorrente." : "Nessun pagamento una tantum."}
             </p>
           ) : (
             items.map((s) => (
-              <SubCard
-                key={s.id}
-                sub={s}
-                onOpen={() => onOpen(s.id)}
-                onQuickFocus={() => onQuickFocus(s.id)}
-              />
+              <SubCard key={s.id} sub={s} onOpen={() => onOpen(s.id)} onQuickFocus={() => onQuickFocus(s.id)} />
             ))
           )}
         </div>
@@ -275,38 +199,28 @@ function SpendRing({ percent, active }: { percent: number; active: boolean }) {
   }, [percent, active]);
   const fill = track * Math.min(1, Math.max(0, shown));
   const cx = size / 2;
+  const sweep = 270;
+  const startDeg = 135;
+  const tipDeg = startDeg + sweep * Math.min(1, Math.max(0, shown));
+  const tipRad = (tipDeg * Math.PI) / 180;
+  const labelR = r + 22;
+  const lx = cx + Math.cos(tipRad) * labelR;
+  const ly = cx + Math.sin(tipRad) * labelR;
+  const pct = Math.round(shown * 100);
   return (
+    <>
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} overflow="visible" aria-hidden>
       <g transform={`rotate(135 ${cx} ${cx})`}>
-        <circle
-          cx={cx}
-          cy={cx}
-          r={r}
-          fill="none"
-          stroke="rgba(165,243,252,0.18)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${track} ${c}`}
-        />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(165,243,252,0.18)" strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${track} ${c}`} />
         {fill >= 2 ? (
-        <circle
-          cx={cx}
-          cy={cx}
-          r={r}
-          fill="none"
-          stroke="var(--color-cyan)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${fill} ${c}`}
-          style={{
-            filter:
-              "drop-shadow(0 0 6px rgba(165,243,252,1)) drop-shadow(0 0 16px rgba(34,211,238,0.85)) drop-shadow(0 0 32px rgba(34,211,238,0.45))",
-            transition: "stroke-dasharray 900ms cubic-bezier(0.22, 1, 0.36, 1)",
-          }}
-        />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="var(--color-cyan)" strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${fill} ${c}`} style={{ filter: "drop-shadow(0 0 6px rgba(165,243,252,1)) drop-shadow(0 0 16px rgba(34,211,238,0.85)) drop-shadow(0 0 32px rgba(34,211,238,0.45))" }} />
         ) : null}
       </g>
     </svg>
+    <span className="pointer-events-none absolute font-display text-[11px] font-semibold tabular-nums text-cyan" style={{ left: lx, top: ly, transform: "translate(-50%, -50%)", textShadow: "0 0 8px rgba(34,211,238,0.85)" }}>
+      {pct}%
+    </span>
+    </>
   );
 }
 
@@ -314,9 +228,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="glass-soft rounded-2xl px-2 py-3 text-center">
       <p className="text-[10px] text-muted">{label}</p>
-      <p className="mt-1 font-display text-[13px] font-semibold tabular-nums">
-        {value}
-      </p>
+      <p className="mt-1 font-display text-[13px] font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
