@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { normalizeCategory } from "./domain";
+import { normalizeCategory, type SpendPeriod } from "./domain";
 import { SEED } from "./seed";
 import type { CategoryId, Subscription } from "./types";
 
@@ -13,6 +13,8 @@ interface AppState {
   displayName: string;
   email: string;
   orbitSpeed: OrbitSpeed;
+  spendPeriod: SpendPeriod;
+  formDraft: Record<string, string> | null;
   addSubscription: (sub: Omit<Subscription, "id">) => string;
   updateSubscription: (id: string, patch: Partial<Subscription>) => void;
   removeSubscription: (id: string) => void;
@@ -21,9 +23,12 @@ interface AppState {
   setDisplayName: (v: string) => void;
   setEmail: (v: string) => void;
   setOrbitSpeed: (v: OrbitSpeed) => void;
+  setSpendPeriod: (v: SpendPeriod) => void;
+  setFormDraft: (v: Record<string, string> | null) => void;
   replaceAll: (subs: Subscription[]) => void;
   clearSubscriptions: () => void;
   resetDemo: () => void;
+  loadDemo3: () => void;
 }
 
 function migrateSub(s: Subscription): Subscription {
@@ -42,6 +47,8 @@ export const useAppStore = create<AppState>()(
       displayName: "Matteo",
       email: "",
       orbitSpeed: 1,
+      spendPeriod: "month",
+      formDraft: null,
       addSubscription: (sub) => {
         const id =
           typeof crypto !== "undefined" && crypto.randomUUID
@@ -58,9 +65,7 @@ export const useAppStore = create<AppState>()(
       updateSubscription: (id, patch) =>
         set((s) => ({
           subscriptions: s.subscriptions.map((it) =>
-            it.id === id
-              ? migrateSub({ ...it, ...patch })
-              : it,
+            it.id === id ? migrateSub({ ...it, ...patch }) : it,
           ),
         })),
       removeSubscription: (id) =>
@@ -72,6 +77,8 @@ export const useAppStore = create<AppState>()(
       setDisplayName: (v) => set({ displayName: v }),
       setEmail: (v) => set({ email: v }),
       setOrbitSpeed: (v) => set({ orbitSpeed: v }),
+      setSpendPeriod: (v) => set({ spendPeriod: v }),
+      setFormDraft: (v) => set({ formDraft: v }),
       replaceAll: (subs) =>
         set({
           subscriptions: subs
@@ -89,6 +96,12 @@ export const useAppStore = create<AppState>()(
           displayName: "Matteo",
           email: "",
           orbitSpeed: 1,
+          spendPeriod: "month",
+          formDraft: null,
+        }),
+      loadDemo3: () =>
+        set({
+          subscriptions: SEED.slice(0, 3).map((s) => migrateSub({ ...s })),
         }),
     }),
     {
@@ -114,6 +127,8 @@ export const useAppStore = create<AppState>()(
         displayName: s.displayName,
         email: s.email,
         orbitSpeed: s.orbitSpeed,
+        spendPeriod: s.spendPeriod ?? "month",
+        formDraft: s.formDraft ?? null,
       }),
     },
   ),
