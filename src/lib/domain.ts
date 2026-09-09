@@ -342,6 +342,36 @@ export function daysUntilRenewal(s: Subscription, from: Date = new Date()): numb
   return Math.max(0, days);
 }
 
+export function isOncePast(s: Subscription, from: Date = new Date()): boolean {
+  if (s.frequency !== "once") return false;
+  return differenceInCalendarDays(nextOccurrence(s.nextRenewal, "once", from), startOfDay(from)) < 0;
+}
+
+export function duePhrase(s: Subscription, from: Date = new Date()): string {
+  if (s.frequency === "once") {
+    const d = differenceInCalendarDays(nextOccurrence(s.nextRenewal, "once", from), startOfDay(from));
+    if (d < 0) return "già pagato";
+    if (d === 0) return "oggi";
+    return `tra ${d}g`;
+  }
+  const d = daysUntilRenewal(s, from);
+  if (d <= 0) return "oggi";
+  return `tra ${d}g`;
+}
+
+export function upcomingRenewals(
+  subs: Subscription[],
+  limit = 3,
+  from: Date = new Date(),
+) {
+  return subs
+    .filter((s) => s.status === "active")
+    .filter((s) => !isOncePast(s, from))
+    .map((s) => ({ s, days: daysUntilRenewal(s, from) }))
+    .sort((a, b) => a.days - b.days || a.s.name.localeCompare(b.s.name, "it"))
+    .slice(0, limit);
+}
+
 export function frequencyBand(freq: Frequency): number {
   switch (freq) {
     case "weekly":
