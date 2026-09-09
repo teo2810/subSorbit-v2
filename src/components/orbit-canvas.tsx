@@ -1,0 +1,587 @@
+import { useEffect, useRef } from "react";
+import { activeMonthlyTotal, classify, daysUntilRenewal, monthlyEquivalent, orbitUrgency } from "@/lib/domain";
+import { formatEuroCompact } from "@/lib/format";
+import { drawBrand, getBrand, preloadBrandIcons } from "@/lib/logos";
+import type { StatusFilter, Subscription } from "@/lib/types";
+
+interface Props {
+  subscriptions: Subscription[];
+  filter: StatusFilter;
+  speed: number;
+  focusId: string | null;
+  pinnedId?: string | null;
+  leaderY?: number | null;
+  centerLabel?: string | null;
+  onSelect: (id: string | null) => void;
+  onFocusDone: () => void;
+}
+
+interface Body {
+  id: string;
+  name: string;
+  kind: ReturnType<typeof classify>;
+  paused: boolean;
+  brandKey: string;
+  color: string;
+  radius: number;
+  angle: number;
+  size: number;
+  inc: number;
+  node: number;
+  omega: number;
+  urgency: number;
+  days: number;
+  price: number;
+  px: number;
+  py: number;
+  pz: number;
+  pr: number;
+}
+
+interface Star {
+  x: number;
+  y: number;
+  r: number;
+  a: number;
+  tw: number;
+}
+
+interface Debris {
+  angle: number;
+  rJit: number;
+  size: number;
+  a: number;
+}
+
+function visibleForFilter(sub: Subscription, filter: StatusFilter): boolean {
+  if (filter === "all") return true;
+  return sub.status === filter;
+}
+
+function project(wx: number, wy: number, wz: number, rot: number, tilt: number, zoom: number, cx: number, cy: number) {
+  const cosY = Math.cos(rot);
+  const sinY = Math.sin(rot);
+  const x = wx * cosY - wz * sinY;
+  const z = wx * sinY + wz * cosY;
+  const cosX = Math.cos(tilt);
+  const sinX = Math.sin(tilt);
+  const y2 = wy * cosX - z * sinX;
+  const z2 = wy * sinX + z * cosX;
+  const f = 780;
+  const p = f / (f + z2 + 240);
+  return { x: cx + x * zoom * p, y: cy + y2 * zoom * p, p, z: z2 };
+}
+
+function worldOf(radius: number, angle: number, inc: number, node: number) {
+  const x = Math.cos(angle) * radius;
+  const z = Math.sin(angle) * radius;
+  const si = Math.sin(inc);
+  const ci = Math.cos(inc);
+  const y1 = -z * si;
+  const z1 = z * ci;
+  const cn = Math.cos(node);
+  const sn = Math.sin(node);
+  return { x: x * cn - z1 * sn, y: y1, z: x * sn + z1 * cn };
+}
+
+function hexRgb(color: string): string {
+  const raw = color.trim();
+  const rgb = raw.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgb) return `${rgb[1]}, ${rgb[2]}, ${rgb[3]}`;
+  let m = raw.replace("#", "");
+  if (m.length === 3 && /^[0-9a-fA-F]+$/.test(m)) m = `${m[0]}${m[0]}${m[1]}${m[1]}${m[2]}${m[2]}`;
+  if (m.length === 6 && /^[0-9a-fA-F]+$/.test(m)) {
+    return `${parseInt(m.slice(0, 2), 16)}, ${parseInt(m.slice(2, 4), 16)}, ${parseInt(m.slice(4, 6), 16)}`;
+  }
+  return "34, 211, 238";
+}
+
+const GLOW_HEX: Record<string, string> = {
+  prime: "#FF9900", amazon: "#FF9900", amazonprime: "#FF9900", amazonmusic: "#25D1DA",
+  spotify: "#1ED760", spotifypremium: "#1ED760", netflix: "#E50914", disney: "#6B8CFF",
+  disneyplus: "#6B8CFF", google: "#4285F4", googleone: "#4285F4", youtube: "#FF0000",
+  youtubepremium: "#FF0000", paramount: "#5B9BFF", paramountplus: "#5B9BFF", now: "#00A3E0",
+  nowtv: "#00A3E0", dazn: "#F5E642", sky: "#E2001A", apple: "#E4E7EA", icloud: "#3D95CE",
+  tim: "#3D7CFF", timvision: "#E30613", uber: "#FFFFFF", uberone: "#FFFFFF", notion: "#FFFFFF", revolut: "#66D9EF",
+};
+
+function glowRgb(color: string, brandKey?: string): string {
+  const key = (brandKey || "").toLowerCase().replace(/[\s+_]/g, "");
+  const src = GLOW_HEX[key] || color;
+  const [rs, gs, bs] = hexRgb(src).split(",").map((n) => Number(n.trim()));
+  let r = rs ?? 34;
+  let g = gs ?? 211;
+  let b = bs ?? 238;
+  const max = Math.max(r, g, b, 1);
+  if (max < 90) {
+    const k = 170 / max;
+    r = Math.min(255, Math.round(r * k));
+    g = Math.min(255, Math.round(g * k));
+    b = Math.min(255, Math.round(b * k));
+  }
+  return `${r}, ${g}, ${b}`;
+}
+
+function hash(n: number) {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const BAND = {
+  weekly: { radius: 88, inc: 0.11, node: 0.08 },
+  monthly: { radius: 168, inc: 0.2, node: -0.14 },
+  yearly: { radius: 248, inc: 0.15, node: 0.24 },
+  trash: { radius: 328, inc: 0.13, node: 0.18 },
+} as const;
+
+function sizeStep(share: number) {
+  if (share >= 0.22) return 24;
+  if (share >= 0.12) return 18;
+  if (share >= 0.05) return 14;
+  return 11;
+}
+
+function bandOf(s: Subscription, total: number) {
+  if (s.status === "cancelled" || classify(s, total) === "trash") return "trash" as const;
+  if (s.frequency === "weekly") return "weekly" as const;
+  if (s.frequency === "yearly" || s.frequency === "once") return "yearly" as const;
+  return "monthly" as const;
+}
+
+const RING_OMEGA = { weekly: 0.22, monthly: 0.13, yearly: 0.08, trash: 0.055 } as const;
+
+function bodySize(s: Subscription, key: keyof typeof BAND, total: number) {
+  if (key === "trash") return 11;
+  const share = total > 0 ? monthlyEquivalent(s) / Math.max(total, 0.01) : 0.08;
+  return sizeStep(share);
+}
+
+function packBand(items: Subscription[], key: keyof typeof BAND, total: number, startR: number): { bodies: Body[]; nextR: number } {
+  const base = BAND[key];
+  if (!items.length) return { bodies: [], nextR: startR };
+  const bodies: Body[] = [];
+  let r = startR;
+  let i = 0;
+  let ring = 0;
+  while (i < items.length) {
+    const batch: { s: Subscription; size: number }[] = [];
+    let used = 0;
+    const circ = Math.max(1, 2 * Math.PI * r);
+    while (i < items.length) {
+      const s = items[i]!;
+      const size = bodySize(s, key, total);
+      const need = size * 2 + 16;
+      if (batch.length && used + need > circ * 0.88) break;
+      batch.push({ s, size });
+      used += need;
+      i += 1;
+      if (batch.length >= 7) break;
+    }
+    if (!batch.length) {
+      const s = items[i]!;
+      batch.push({ s, size: bodySize(s, key, total) });
+      i += 1;
+    }
+    const n = batch.length;
+    const maxSize = batch.reduce((m, it) => Math.max(m, it.size), 10);
+    for (let slot = 0; slot < n; slot++) {
+      const it = batch[slot]!;
+      bodies.push({
+        id: it.s.id, name: it.s.name, kind: classify(it.s, total), paused: it.s.status === "paused",
+        brandKey: it.s.brandKey, color: getBrand(it.s.brandKey).color, radius: r,
+        angle: (slot / n) * Math.PI * 2 + ring * 0.31, size: it.size, inc: base.inc, node: base.node,
+        omega: RING_OMEGA[key], urgency: it.s.status === "cancelled" ? 0 : orbitUrgency(it.s),
+        days: daysUntilRenewal(it.s), price: it.s.price, px: 0, py: 0, pz: 0, pr: it.size,
+      });
+    }
+    r += Math.max(34, maxSize * 2 + 18);
+    ring += 1;
+  }
+  return { bodies, nextR: r + 14 };
+}
+
+function buildBodies(subs: Subscription[], filter: StatusFilter): Body[] {
+  const total = activeMonthlyTotal(subs);
+  const shown = subs.filter((s) => visibleForFilter(s, filter));
+  const groups = { weekly: [] as Subscription[], monthly: [] as Subscription[], yearly: [] as Subscription[], trash: [] as Subscription[] };
+  for (const s of shown) groups[bandOf(s, total)].push(s);
+  for (const k of Object.keys(groups) as (keyof typeof groups)[]) {
+    groups[k].sort((a, b) => monthlyEquivalent(b) - monthlyEquivalent(a));
+  }
+  const weekly = packBand(groups.weekly, "weekly", total, BAND.weekly.radius);
+  const monthly = packBand(groups.monthly, "monthly", total, Math.max(BAND.monthly.radius, weekly.nextR));
+  const yearly = packBand(groups.yearly, "yearly", total, Math.max(BAND.yearly.radius, monthly.nextR));
+  const trash = packBand(groups.trash, "trash", total, Math.max(BAND.trash.radius, yearly.nextR));
+  return [...weekly.bodies, ...monthly.bodies, ...yearly.bodies, ...trash.bodies];
+}
+
+export function trashRadius(bodies: Body[]) {
+  const t = bodies.find((b) => b.kind === "trash");
+  if (t) return t.radius;
+  const max = bodies.reduce((m, b) => Math.max(m, b.radius), 82);
+  return max + 40;
+}
+
+export function OrbitCanvas({
+  subscriptions, filter, speed, focusId, pinnedId = null, leaderY = null, centerLabel = null, onSelect, onFocusDone,
+}: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const onSelectRef = useRef(onSelect);
+  const onFocusDoneRef = useRef(onFocusDone);
+  const speedRef = useRef(speed);
+  const leaderYRef = useRef(leaderY);
+  const centerLabelRef = useRef(centerLabel);
+  onSelectRef.current = onSelect;
+  onFocusDoneRef.current = onFocusDone;
+  leaderYRef.current = leaderY;
+  centerLabelRef.current = centerLabel;
+  speedRef.current = speed;
+
+  const simRef = useRef({
+    rot: 0.55, tilt: 0.68, zoom: 1, targetRot: 0.55, targetTilt: 0.68, targetZoom: 1,
+    cyFactor: 0.42, targetCyFactor: 0.42, dragging: false, moved: false, lastX: 0, lastY: 0,
+    pointerId: -1, pinch: null as null | { dist: number; zoom: number }, stars: [] as Star[],
+    debris: [] as Debris[], bodies: [] as Body[], focusId: null as string | null,
+    followId: null as string | null, hoverId: null as string | null, last: 0, totalLabel: "",
+    w: 1, h: 1, dpr: 1, trashR: 240, sunX: 0, sunY: 0, sunR: 20,
+  });
+
+  useEffect(() => { preloadBrandIcons(); }, []);
+
+  useEffect(() => {
+    const sim = simRef.current;
+    sim.bodies = buildBodies(subscriptions, filter);
+    sim.totalLabel = centerLabelRef.current || formatEuroCompact(activeMonthlyTotal(subscriptions));
+    sim.trashR = trashRadius(sim.bodies);
+  }, [subscriptions, filter]);
+
+  useEffect(() => {
+    const id = pinnedId || focusId;
+    const sim = simRef.current;
+    if (!id) {
+      sim.followId = null; sim.focusId = null; sim.targetZoom = 1; sim.targetTilt = 0.68; sim.targetCyFactor = 0.42;
+      return;
+    }
+    if (id === "__sun__") {
+      sim.focusId = "__sun__"; sim.followId = null; sim.targetZoom = 1.18; sim.targetTilt = 0.68; sim.targetCyFactor = 0.38;
+      return;
+    }
+    const body = sim.bodies.find((b) => b.id === id);
+    if (!body) { onFocusDoneRef.current(); return; }
+    sim.focusId = id; sim.followId = id;
+    sim.targetZoom = pinnedId ? 1.72 : 1.85;
+    sim.targetTilt = pinnedId ? 0.52 : 0.55;
+    sim.targetCyFactor = 0.34;
+  }, [focusId, pinnedId]);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const canvas = canvasRef.current;
+    if (!wrap || !canvas) return;
+    const sim = simRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const seedStars = (w: number, h: number) => {
+      sim.stars = Array.from({ length: 140 }, (_, i) => ({
+        x: hash(i + 1) * w, y: hash(i + 40) * h, r: 0.35 + hash(i + 9) * 1.35,
+        a: 0.18 + hash(i + 21) * 0.62, tw: hash(i + 33) * Math.PI * 2,
+      }));
+      sim.debris = Array.from({ length: 72 }, (_, i) => ({
+        angle: hash(i + 70) * Math.PI * 2, rJit: (hash(i + 90) - 0.5) * 16,
+        size: 1.1 + hash(i + 50) * 3.2, a: 0.35 + hash(i + 12) * 0.5,
+      }));
+    };
+
+    const resize = () => {
+      const rect = wrap.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      sim.w = rect.width; sim.h = rect.height; sim.dpr = dpr;
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      seedStars(rect.width, rect.height);
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(wrap);
+
+    const hitTest = (x: number, y: number): Body | null => {
+      let best: Body | null = null;
+      let bestD = Infinity;
+      for (const b of sim.bodies) {
+        const d = Math.hypot(b.px - x, b.py - y);
+        if (d < Math.max(18, b.pr + 10) && (b.pz < (best?.pz ?? 999) || d < bestD - 6)) {
+          best = b; bestD = d;
+        }
+      }
+      return best;
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === "touch" && e.isPrimary === false) return;
+      sim.dragging = true; sim.moved = false; sim.lastX = e.clientX; sim.lastY = e.clientY;
+      sim.pointerId = e.pointerId; wrap.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = wrap.getBoundingClientRect();
+      const lx = e.clientX - rect.left; const ly = e.clientY - rect.top;
+      const onSun = Math.hypot(lx - sim.sunX, ly - sim.sunY) < Math.max(22, sim.sunR * 1.08);
+      const hovered = onSun ? null : hitTest(lx, ly);
+      sim.hoverId = onSun ? "__sun__" : hovered?.id ?? null;
+      wrap.style.cursor = onSun || hovered ? "pointer" : sim.dragging ? "grabbing" : "grab";
+      if (!sim.dragging || e.pointerId !== sim.pointerId) return;
+      const dx = e.clientX - sim.lastX; const dy = e.clientY - sim.lastY;
+      if (Math.hypot(dx, dy) > 4) { sim.moved = true; sim.followId = null; }
+      sim.targetRot += dx * 0.006;
+      sim.targetTilt = Math.max(0.35, Math.min(1.05, sim.targetTilt + dy * 0.004));
+      sim.lastX = e.clientX; sim.lastY = e.clientY;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerId !== sim.pointerId) return;
+      const rect = wrap.getBoundingClientRect();
+      if (!sim.moved) {
+        const lx = e.clientX - rect.left; const ly = e.clientY - rect.top;
+        if (Math.hypot(lx - sim.sunX, ly - sim.sunY) < Math.max(22, sim.sunR * 1.08)) onSelectRef.current("__sun__");
+        else { const hit = hitTest(lx, ly); onSelectRef.current(hit ? hit.id : null); }
+      }
+      sim.dragging = false; sim.pointerId = -1;
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      sim.targetZoom = Math.max(0.55, Math.min(2.8, sim.targetZoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const a = e.touches[0]!; const b = e.touches[1]!;
+        sim.pinch = { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), zoom: sim.zoom };
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && sim.pinch) {
+        e.preventDefault();
+        const a = e.touches[0]!; const b = e.touches[1]!;
+        const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        sim.targetZoom = Math.max(0.55, Math.min(2.8, sim.pinch.zoom * (d / sim.pinch.dist)));
+      }
+    };
+    const onTouchEnd = () => { sim.pinch = null; };
+    const onDbl = () => {
+      sim.followId = null; sim.targetZoom = 1; sim.targetRot = 0.55; sim.targetTilt = 0.68; sim.targetCyFactor = 0.42;
+    };
+
+    wrap.addEventListener("pointerdown", onPointerDown);
+    wrap.addEventListener("pointermove", onPointerMove);
+    wrap.addEventListener("pointerup", onPointerUp);
+    wrap.addEventListener("pointercancel", onPointerUp);
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    wrap.addEventListener("touchstart", onTouchStart, { passive: true });
+    wrap.addEventListener("touchmove", onTouchMove, { passive: false });
+    wrap.addEventListener("touchend", onTouchEnd);
+    wrap.addEventListener("dblclick", onDbl);
+
+    let raf = 0;
+    const tick = (now: number) => {
+      const spd = speedRef.current;
+      const dt = Math.min(0.05, sim.last ? (now - sim.last) / 1000 : 0.016);
+      sim.last = now;
+      const w = sim.w; const h = sim.h;
+
+      if (sim.followId && !sim.dragging) {
+        const tracked = sim.bodies.find((b) => b.id === sim.followId);
+        if (tracked) {
+          const wpos = worldOf(tracked.radius, tracked.angle, tracked.inc, tracked.node);
+          const rA = Math.atan2(wpos.x, wpos.z); const rB = rA + Math.PI;
+          const zA = project(wpos.x, wpos.y, wpos.z, rA, sim.tilt, 1, 0, 0).z;
+          const zB = project(wpos.x, wpos.y, wpos.z, rB, sim.tilt, 1, 0, 0).z;
+          sim.targetRot = zA <= zB ? rA : rB;
+        }
+      }
+
+      const ease = 1 - Math.exp(-dt * 3.6);
+      let dRot = sim.targetRot - sim.rot;
+      while (dRot > Math.PI) dRot -= Math.PI * 2;
+      while (dRot < -Math.PI) dRot += Math.PI * 2;
+      sim.rot += dRot * ease;
+      sim.tilt += (sim.targetTilt - sim.tilt) * ease;
+      sim.zoom += (sim.targetZoom - sim.zoom) * ease;
+      sim.cyFactor += (sim.targetCyFactor - sim.cyFactor) * ease;
+
+      const cx = w * 0.5; const cy = h * sim.cyFactor;
+      const fit = Math.min(w / 720, h / 720);
+      const zoom = sim.zoom * fit; const rot = sim.rot; const tilt = sim.tilt;
+
+      ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      for (const s of sim.stars) {
+        const tw = 0.55 + 0.45 * Math.sin(now * 0.0018 + s.tw);
+        ctx.fillStyle = `rgba(230,240,255,${s.a * tw})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+      }
+
+      const drawRing = (radius: number, inc: number, node: number, color: string, width: number, dash?: number[]) => {
+        const steps = 96;
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const a = (i / steps) * Math.PI * 2;
+          const wpos = worldOf(radius, a, inc, node);
+          const p = project(wpos.x, wpos.y, wpos.z, rot, tilt, zoom, cx, cy);
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash ?? []); ctx.stroke(); ctx.setLineDash([]);
+      };
+
+      const selected = sim.bodies.find((b) => b.id === sim.focusId);
+      const ringKeys = new Map<string, Body>();
+      for (const b of sim.bodies) {
+        const k = `${b.radius.toFixed(1)}:${b.inc}:${b.node}`;
+        if (!ringKeys.has(k)) ringKeys.set(k, b);
+      }
+      for (const b of ringKeys.values()) {
+        if (b.kind === "trash") continue;
+        const on = selected?.id === b.id || (selected && selected.radius === b.radius && selected.inc === b.inc);
+        const faded = Boolean(selected) && !on;
+        drawRing(b.radius, b.inc, b.node, faded ? "rgba(170,220,255,0.1)" : "rgba(170,220,255,0.3)", on ? 1.35 : faded ? 0.7 : 0.95);
+      }
+      drawRing(sim.trashR, BAND.trash.inc, BAND.trash.node, selected ? "rgba(210,200,180,0.12)" : "rgba(210,200,180,0.42)", selected ? 0.7 : 1.25, [5, 9]);
+
+      for (const d of sim.debris) {
+        d.angle += 0.22 * spd * dt;
+        const wpos = worldOf(sim.trashR + d.rJit, d.angle, BAND.trash.inc, BAND.trash.node);
+        const p = project(wpos.x, wpos.y, wpos.z, rot, tilt, zoom, cx, cy);
+        ctx.fillStyle = `rgba(220,210,190,${Math.min(1, (d.a * p.p + 0.15) * (selected ? 0.25 : 1))})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0.8, d.size * p.p * zoom), 0, Math.PI * 2); ctx.fill();
+      }
+
+      for (const b of sim.bodies) {
+        b.angle += b.omega * spd * dt;
+        const wpos = worldOf(b.radius, b.angle, b.inc, b.node);
+        const p = project(wpos.x, wpos.y, wpos.z, rot, tilt, zoom, cx, cy);
+        b.px = p.x; b.py = p.y; b.pz = p.z; b.pr = b.size * p.p * zoom;
+      }
+
+      const sunP = project(0, 0, 0, rot, tilt, zoom, cx, cy);
+      const sunR = 38 * zoom * sunP.p;
+      sim.sunX = sunP.x; sim.sunY = sunP.y; sim.sunR = sunR;
+
+      const drawSun = () => {
+        const pulse = 0.94 + Math.sin(now * 0.0016) * 0.06;
+        const bloomScale = sim.focusId ? 3.1 : 6.2;
+        const bloom = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, sunR * bloomScale * pulse);
+        bloom.addColorStop(0, "rgba(255,255,255,1)");
+        bloom.addColorStop(0.08, "rgba(186,247,255,0.95)");
+        bloom.addColorStop(0.18, "rgba(34,211,238,0.7)");
+        bloom.addColorStop(0.34, "rgba(34,211,238,0.28)");
+        bloom.addColorStop(0.55, "rgba(14,165,233,0.1)");
+        bloom.addColorStop(1, "rgba(14,165,233,0)");
+        ctx.fillStyle = bloom; ctx.beginPath(); ctx.arc(sunP.x, sunP.y, sunR * bloomScale * pulse, 0, Math.PI * 2); ctx.fill();
+        const core = ctx.createRadialGradient(sunP.x - sunR * 0.16, sunP.y - sunR * 0.18, sunR * 0.05, sunP.x, sunP.y, sunR * 1.15);
+        core.addColorStop(0, "#ffffff"); core.addColorStop(0.28, "#e6fcff"); core.addColorStop(0.58, "#7dd3fc");
+        core.addColorStop(0.82, "rgba(34,211,238,0.55)"); core.addColorStop(1, "rgba(34,211,238,0)");
+        ctx.fillStyle = core; ctx.beginPath(); ctx.arc(sunP.x, sunP.y, sunR * 1.15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(8,20,40,0.78)";
+        const label = centerLabelRef.current || sim.totalLabel;
+        const scale = label.length > 10 ? 0.24 : label.length > 7 ? 0.28 : 0.34;
+        ctx.font = `700 ${Math.max(10, sunR * scale)}px Outfit, sans-serif`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(label, sunP.x, sunP.y);
+      };
+
+      const drawBody = (b: Body) => {
+        const focused = sim.focusId === b.id;
+        const isFar = b.pz > 0;
+        const distSun = Math.hypot(b.px - sunP.x, b.py - sunP.y);
+        if (!focused && isFar && distSun < sunR * 0.92) return;
+        ctx.save();
+        if (focused) ctx.globalAlpha = 1;
+        else if (sim.focusId) ctx.globalAlpha = 0.42;
+        else if (isFar) ctx.globalAlpha = distSun < sunR * 1.7 ? 0.45 : 0.92;
+        if (b.paused) {
+          for (let i = 0; i < 4; i++) {
+            const ang = now * 0.0004 + i * 1.6;
+            const ox = Math.cos(ang) * b.pr * 0.55;
+            const oy = Math.sin(ang * 0.8) * b.pr * 0.35;
+            const cloud = ctx.createRadialGradient(b.px + ox, b.py + oy, b.pr * 0.2, b.px + ox, b.py + oy, b.pr * 1.7);
+            cloud.addColorStop(0, "rgba(40,46,62,0.55)"); cloud.addColorStop(0.55, "rgba(18,22,34,0.32)"); cloud.addColorStop(1, "rgba(8,10,16,0)");
+            ctx.fillStyle = cloud; ctx.beginPath(); ctx.arc(b.px + ox, b.py + oy, b.pr * 1.7, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        if (!b.paused && b.kind !== "trash") {
+          const u = Math.max(0, Math.min(1, b.urgency));
+          const step = u >= 0.66 ? 2 : u >= 0.33 ? 1 : 0;
+          const period = [3.8, 2.4, 1.5][step]!;
+          const amp = [0.18, 0.3, 0.44][step]!;
+          const beat = 0.5 + 0.5 * Math.sin((now / 1000) * ((Math.PI * 2) / period));
+          const rgb = glowRgb(b.color, b.brandKey);
+          const inner = Math.max(1, b.pr * 0.98);
+          const outer = Math.max(b.pr + 16, b.pr * (3.1 + amp * beat * 1.2 + (focused ? 0.4 : 0)));
+          const a = (focused ? 0.7 : 0.52) + amp * beat * 0.25;
+          ctx.save(); ctx.globalCompositeOperation = "lighter";
+          const halo = ctx.createRadialGradient(b.px, b.py, inner, b.px, b.py, outer);
+          halo.addColorStop(0, `rgba(${rgb}, ${a * 0.85})`);
+          halo.addColorStop(0.22, `rgba(${rgb}, ${a})`);
+          halo.addColorStop(0.55, `rgba(${rgb}, ${a * 0.4})`);
+          halo.addColorStop(1, `rgba(${rgb}, 0)`);
+          ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(b.px, b.py, outer, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        }
+        drawBrand(ctx, b.brandKey, b.px, b.py, b.pr);
+        ctx.restore();
+        if (!focused && (sim.hoverId === b.id || sim.focusId === b.id)) {
+          ctx.font = `600 ${Math.max(10, Math.min(13, b.pr * 0.7))}px Outfit, sans-serif`;
+          ctx.textAlign = "center"; ctx.textBaseline = "top";
+          ctx.fillStyle = "rgba(238,242,255,0.92)";
+          ctx.fillText(b.name, b.px, b.py + b.pr + 5);
+        }
+      };
+
+      const sorted = [...sim.bodies].sort((a, b) => b.pz - a.pz);
+      const fid = sim.focusId;
+      const far = sorted.filter((b) => b.pz > 0 && b.id !== fid);
+      const near = sorted.filter((b) => b.pz <= 0 && b.id !== fid);
+      const focusedBody = fid ? sim.bodies.find((b) => b.id === fid) : undefined;
+      for (const b of far) drawBody(b);
+      drawSun();
+      for (const b of near) drawBody(b);
+      const drawLeader = (ax: number, ay: number, color: string) => {
+        const ty = leaderYRef.current;
+        const by = ty != null && ty > ay + 8 ? ty : Math.min(h * 0.72, ay + 80);
+        const mid = w * 0.5;
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 1.35;
+        ctx.beginPath(); ctx.moveTo(ax, ay);
+        ctx.lineTo(ax, ay + Math.min(16, Math.max(8, (by - ay) * 0.18)));
+        ctx.lineTo(mid, by); ctx.stroke(); ctx.restore();
+      };
+      if (focusedBody) {
+        drawBody(focusedBody);
+        const rgb = glowRgb(focusedBody.color, focusedBody.brandKey);
+        drawLeader(focusedBody.px, focusedBody.py + focusedBody.pr + 4, `rgba(${rgb},0.8)`);
+      } else if (fid === "__sun__") {
+        drawLeader(sunP.x, sunP.y + sunR + 4, "rgba(34,211,238,0.75)");
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf); ro.disconnect();
+      wrap.removeEventListener("pointerdown", onPointerDown);
+      wrap.removeEventListener("pointermove", onPointerMove);
+      wrap.removeEventListener("pointerup", onPointerUp);
+      wrap.removeEventListener("pointercancel", onPointerUp);
+      wrap.removeEventListener("wheel", onWheel);
+      wrap.removeEventListener("touchstart", onTouchStart);
+      wrap.removeEventListener("touchmove", onTouchMove);
+      wrap.removeEventListener("touchend", onTouchEnd);
+      wrap.removeEventListener("dblclick", onDbl);
+    };
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="absolute inset-0 cursor-grab touch-none">
+      <canvas ref={canvasRef} className="h-full w-full" />
+    </div>
+  );
+}
