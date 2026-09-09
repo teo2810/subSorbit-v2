@@ -7,10 +7,13 @@ import { cn } from "@/lib/cn";
 import {
   activeMonthlyTotal,
   computePeriodSpend,
+  duePhrase,
+  upcomingRenewals,
   yearlyProjection,
-  type SpendPeriod,
 } from "@/lib/domain";
 import { formatEuroCompact } from "@/lib/format";
+import { BrandBadge } from "@/lib/logos";
+import { useAppStore } from "@/lib/store";
 import type { Subscription } from "@/lib/types";
 
 const STATUS_ORDER: Record<Subscription["status"], number> = {
@@ -24,15 +27,19 @@ export function HomeView({
   onOpen,
   onQuickFocus,
   onSettings,
+  onAdd,
   active = true,
 }: {
   subscriptions: Subscription[];
   onOpen: (id: string) => void;
   onQuickFocus: (id: string) => void;
   onSettings: () => void;
+  onAdd: () => void;
   active?: boolean;
 }) {
-  const [period, setPeriod] = useState<SpendPeriod>("month");
+  const period = useAppStore((s) => s.spendPeriod);
+  const setPeriod = useAppStore((s) => s.setSpendPeriod);
+  const loadDemo3 = useAppStore((s) => s.loadDemo3);
   const [lane, setLane] = useState<"subs" | "once">("subs");
   const [sort, setSort] = useState<"renewal" | "price" | "name">("renewal");
   const [desc, setDesc] = useState(false);
@@ -43,6 +50,7 @@ export function HomeView({
   );
   const monthly = activeMonthlyTotal(subscriptions);
   const yearly = yearlyProjection(subscriptions);
+  const next3 = useMemo(() => upcomingRenewals(subscriptions, 3), [subscriptions]);
 
   const recurring = useMemo(
     () =>
@@ -60,12 +68,11 @@ export function HomeView({
   );
 
   useEffect(() => {
-    const onFlip = () => setPeriod((cur) => (cur === "month" ? "year" : "month"));
+    const onFlip = () => setPeriod(period === "month" ? "year" : "month");
     window.addEventListener("orbit-flip-period", onFlip);
     return () => window.removeEventListener("orbit-flip-period", onFlip);
-  }, []);
+  }, [period, setPeriod]);
 
-  const pct = Math.round(spend.percent * 100);
   const items = useMemo(() => {
     const list = (lane === "subs" ? recurring : once).slice();
     const dir = desc ? -1 : 1;
@@ -87,6 +94,8 @@ export function HomeView({
     }
   };
 
+  const empty = subscriptions.length === 0;
+
   return (
     <div className="mx-auto flex h-full w-full max-w-[520px] flex-col">
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-36">
@@ -97,15 +106,15 @@ export function HomeView({
           <ChartBackdrop />
           <div className="relative h-[236px] w-[236px]">
           <SpendRing percent={spend.percent} active={active} />
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
-            <p className="font-display text-[32px] font-semibold tabular-nums leading-none tracking-tight">
-              {formatEuroCompact(spend.paid)}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-7 text-center">
+            <p className="text-[11px] leading-snug text-muted">
+              {period === "month" ? "Mancano ancora questo mese" : "Mancano ancora quest’anno"}
             </p>
-            <p className="mt-2 text-[11px] leading-snug text-muted">
-              {period === "month" ? "Usciti dal conto questo mese" : "Usciti dal conto quest’anno"}
+            <p className="mt-1.5 font-display text-[34px] font-semibold tabular-nums leading-none tracking-tight">
+              {formatEuroCompact(spend.remaining)}
             </p>
-            <p className="mt-1.5 text-[11px] tabular-nums text-cyan">
-              {formatEuroCompact(spend.due)} in scadenza · {pct}%
+            <p className="mt-2 text-[11px] tabular-nums text-cyan">
+              già usciti {formatEuroCompact(spend.paid)} · previsti {formatEuroCompact(spend.due)}
             </p>
           </div>
           </div>
@@ -113,6 +122,51 @@ export function HomeView({
 
         <div className="mt-2 flex justify-center">
           <PeriodSwitch period={period} onChange={setPeriod} live={active} />
+        </div>
+
+        {empty ? (
+          <div className="mt-8 text-center">
+            <p className="font-display text-base font-medium">Niente in orbita</p>
+            <p className="mt-1 text-sm text-muted">Aggiungi il primo abbonamento. Un minuto.</p>
+            <button
+              type="button"
+              onClick={onAdd}
+              className="glow-tap mt-4 h-12 w-full rounded-2xl bg-cyan font-display text-sm font-semibold text-void"
+            >
+              Aggiungi il primo
+            </button>
+            <button
+              type="button"
+              onClick={loadDemo3}
+              className="mt-3 text-xs text-muted underline-offset-2 hover:underline"
+            >
+              Oppure carica 3 esempi da buttare
+            </button>
+          </div>
+        ) : (
+          <>
+        <div className="mt-5">
+          <p className="mb-2 font-display text-sm font-medium">Prossime scadenze</p>
+          <div className="space-y-1.5">
+            {next3.length === 0 ? (
+              <p className="text-sm text-muted">Nessuna scadenza in vista.</p>
+            ) : (
+              next3.map(({ s }) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => onOpen(s.id)}
+                  className="glow-tap flex w-full items-center gap-2.5 rounded-2xl bg-white/5 px-3 py-2.5 text-left"
+                >
+                  <BrandBadge brandKey={s.brandKey} name={s.name} size={28} />
+                  <span className="min-w-0 flex-1 truncate text-sm">{s.name}</span>
+                  <span className="shrink-0 text-[12px] tabular-nums text-muted">
+                    {formatEuroCompact(s.price)} · {duePhrase(s)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
         </div>
 
         <div className="mt-5 grid grid-cols-3 gap-2">
@@ -184,6 +238,8 @@ export function HomeView({
             ))
           )}
         </div>
+          </>
+        )}
         </div>
       </div>
     </div>

@@ -100,11 +100,12 @@ export function SettingsSheet({
           />
         </label>
 
-        <div className="mt-4 rounded-lg bg-white/5 px-4 py-3">
-          <p className="text-sm font-medium">Backup</p>
+        <div className="mt-4 rounded-lg bg-cyan/10 px-4 py-3">
+          <p className="text-sm font-medium">Tutto sul telefono. Backup JSON. Niente account.</p>
           <p className="mt-1 text-[12px] leading-relaxed text-muted">
-            Tutto sul telefono. Backup JSON. Niente account. Esporta un file per
-            salvarli, importa lo stesso file per ripristinarli.
+            I dati non lasciano questo dispositivo. Esporta il JSON e tienilo
+            tu. Per ripristinare, importa lo stesso file. Nome ed email finiscono
+            nel file: non parte nessuna mail.
           </p>
         </div>
 
@@ -112,9 +113,9 @@ export function SettingsSheet({
           <button
             type="button"
             onClick={exportJson}
-            className="glass-soft glow-tap flex h-12 items-center justify-center gap-2 rounded-lg text-sm"
+            className="glow-tap flex h-12 items-center justify-center gap-2 rounded-lg bg-cyan font-display text-sm font-semibold text-void"
           >
-            <Download className="size-4" /> Esporta
+            <Download className="size-4" /> Esporta JSON
           </button>
           <button
             type="button"

@@ -14,7 +14,7 @@ import { GlowSwitch } from "./period-switch";
 import { SettingsSheet } from "./settings-sheet";
 import { SubForm } from "./sub-form";
 import { cn } from "@/lib/cn";
-import { activeMonthlyTotal, computePeriodSpend, daysUntilRenewal, orbitUrgency, type SpendPeriod } from "@/lib/domain";
+import { activeMonthlyTotal, computePeriodSpend, daysUntilRenewal, duePhrase, orbitUrgency } from "@/lib/domain";
 import { formatEuroCompact } from "@/lib/format";
 import { BrandBadge, getBrand, preloadBrandIcons } from "@/lib/logos";
 import { useAppStore, type OrbitSpeed } from "@/lib/store";
@@ -23,16 +23,8 @@ import type { StatusFilter, Subscription, TabId } from "@/lib/types";
 const TAB_ORDER: TabId[] = ["home", "orbit", "calendar", "data"];
 
 function dueShort(s: Subscription) {
-  if (s.frequency === "once") {
-    const d = daysUntilRenewal(s);
-    if (d >= 9000) return "una tantum";
-    if (d <= 0) return "una tantum · oggi";
-    return `una tantum · ${d}g`;
-  }
-  const d = daysUntilRenewal(s);
-  if (d >= 9000) return "—";
-  if (d <= 0) return "scade oggi";
-  return `tra ${d}g`;
+  if (s.frequency === "once") return `una tantum · ${duePhrase(s)}`;
+  return duePhrase(s);
 }
 
 const TOAST_OPTIONS = {
@@ -57,7 +49,8 @@ export function AppShell() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
-  const [sunPeriod, setSunPeriod] = useState<SpendPeriod>("month");
+  const sunPeriod = useAppStore((s) => s.spendPeriod);
+  const setSunPeriod = useAppStore((s) => s.setSpendPeriod);
   const [flash, setFlash] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   const orbitBoxRef = useRef<HTMLDivElement>(null);
@@ -78,6 +71,31 @@ export function AppShell() {
     const result = useAppStore.persist.rehydrate() as void | Promise<void>;
     if (result && typeof result.then === "function") void result;
   }, []);
+
+  useEffect(() => {
+    const onPop = () => {
+      if (formOpen) {
+        setFormOpen(false);
+        setEditId(null);
+        return;
+      }
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return;
+      }
+      if (guideOpen) {
+        setGuideOpen(false);
+        return;
+      }
+      if (detailId) {
+        setDetailId(null);
+        return;
+      }
+      if (focusId) setFocusId(null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [formOpen, settingsOpen, guideOpen, detailId, focusId]);
 
   const monthly = activeMonthlyTotal(subscriptions);
   const sunOn = focusId === "__sun__";
@@ -195,6 +213,7 @@ export function AppShell() {
     };
   }, []);
 
+  const idx = TAB_ORDER.indexOf(tab);
   const openSettings = () => setSettingsOpen(true);
 
   return (
@@ -204,10 +223,23 @@ export function AppShell() {
     >
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="relative h-full w-full overflow-hidden">
-          <div className="absolute inset-0 overflow-hidden" style={{ display: tab === "home" ? "block" : "none" }}>
-            <HomeView subscriptions={subscriptions} onOpen={setDetailId} onQuickFocus={quickFocus} onSettings={openSettings} active={tab === "home"} />
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{ display: tab === "home" ? "block" : "none" }}
+          >
+            <HomeView
+              subscriptions={subscriptions}
+              onOpen={setDetailId}
+              onQuickFocus={quickFocus}
+              onSettings={openSettings}
+              onAdd={() => setFormOpen(true)}
+              active={tab === "home"}
+            />
           </div>
-          <div className="absolute inset-0 overflow-hidden" style={{ display: tab === "orbit" ? "block" : "none" }}>
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{ display: tab === "orbit" ? "block" : "none" }}
+          >
             <div ref={orbitBoxRef} className="absolute inset-0 pb-24">
               <OrbitCanvas
                 subscriptions={subscriptions}
@@ -217,14 +249,22 @@ export function AppShell() {
                 pinnedId={focusId}
                 leaderY={leaderY}
                 centerLabel={formatEuroCompact(sunSpend.due)}
-                onSelect={(id) => { setDetailId(null); setFocusId(id); }}
+                onSelect={(id) => {
+                  setDetailId(null);
+                  setFocusId(id);
+                }}
                 onFocusDone={() => setFocusId(null)}
               />
             </div>
             <header className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <div className="pointer-events-auto mx-auto max-w-[720px]">
-                <ScreenHeader onSettings={openSettings} subtitle={`Spesa mensile ${formatEuroCompact(monthly)}/mese`} />
-                <div className="px-5"><FilterChips value={filter} onChange={setFilter} /></div>
+                <ScreenHeader
+                  onSettings={openSettings}
+                  subtitle={`Spesa mensile ${formatEuroCompact(monthly)}/mese`}
+                />
+                <div className="px-5">
+                  <FilterChips value={filter} onChange={setFilter} />
+                </div>
               </div>
             </header>
             <div className="pointer-events-none absolute inset-x-0 bottom-28 z-20 flex flex-col items-center px-4">
@@ -232,11 +272,26 @@ export function AppShell() {
                   <div ref={calloutRef} className="pointer-events-auto mb-2 flex max-w-[92%] items-center gap-2.5 rounded-2xl bg-[#12182ecc] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-md">
                     <div className="size-8 shrink-0 rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff,rgba(34,211,238,0.9)_45%,rgba(14,165,233,0.4)_100%)] shadow-[0_0_16px_rgba(34,211,238,0.55)]" />
                     <div className="min-w-0">
-                      <p className="truncate font-display text-sm font-medium">{sunPeriod === "month" ? "Questo mese" : "Quest’anno"}</p>
-                      <p className="text-[11px] text-muted">pagati {formatEuroCompact(sunSpend.paid)}{" · "}previsti {formatEuroCompact(sunSpend.due)}</p>
+                      <p className="truncate font-display text-sm font-medium">
+                        {sunPeriod === "month" ? "Questo mese" : "Quest’anno"}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        pagati {formatEuroCompact(sunSpend.paid)}
+                        {" · "}
+                        previsti {formatEuroCompact(sunSpend.due)}
+                      </p>
                     </div>
                     <div className="pointer-events-auto shrink-0">
-                      <GlowSwitch compact live value={sunPeriod} onChange={setSunPeriod} options={[{ id: "month", label: "Mese" }, { id: "year", label: "Anno" }]} />
+                      <GlowSwitch
+                        compact
+                        live
+                        value={sunPeriod}
+                        onChange={setSunPeriod}
+                        options={[
+                          { id: "month", label: "Mese" },
+                          { id: "year", label: "Anno" },
+                        ]}
+                      />
                     </div>
                   </div>
                 ) : focused ? (
@@ -244,50 +299,125 @@ export function AppShell() {
                     <BrandBadge brandKey={focused.brandKey} name={focused.name} size={28} />
                     <div className="min-w-0">
                       <p className="truncate font-display text-sm font-medium">{focused.name}</p>
-                      <p className="text-[11px] text-muted">{formatEuroCompact(focused.price)}{" · "}{dueShort(focused)}</p>
+                      <p className="text-[11px] text-muted">
+                        {formatEuroCompact(focused.price)}
+                        {" · "}
+                        {dueShort(focused)}
+                      </p>
                     </div>
-                    <button type="button" aria-label="Modifica" onClick={() => setEditId(focused.id)} className="glow-tap ml-1 flex size-9 shrink-0 items-center justify-center rounded-full bg-cyan text-void">
+                    <button
+                      type="button"
+                      aria-label="Modifica"
+                      onClick={() => setEditId(focused.id)}
+                      className="glow-tap ml-1 flex size-9 shrink-0 items-center justify-center rounded-full bg-cyan text-void"
+                    >
                       <Pencil className="size-3.5" strokeWidth={2.4} />
                     </button>
                   </div>
                 ) : null}
                 <div className="pointer-events-auto mb-2 w-full max-w-[720px]">
-                  <OrbitIconStrip subscriptions={subscriptions} filter={filter} selectedId={focusId} onPick={(id) => { setDetailId(null); setFocusId(focusId === id ? null : id); }} />
+                  <OrbitIconStrip
+                    subscriptions={subscriptions}
+                    filter={filter}
+                    selectedId={focusId}
+                    onPick={(id) => {
+                      setDetailId(null);
+                      setFocusId(focusId === id ? null : id);
+                    }}
+                  />
                 </div>
                 <div className="flex w-full max-w-[720px] items-end justify-between">
-                  <button type="button" onClick={() => setGuideOpen(true)} className="pointer-events-auto glass-soft glow-tap flex h-10 items-center gap-1.5 rounded-full px-3 font-display text-xs text-fg">
+                  <button
+                    type="button"
+                    onClick={() => setGuideOpen(true)}
+                    className="pointer-events-auto glass-soft glow-tap flex h-10 items-center gap-1.5 rounded-full px-3 font-display text-xs text-fg"
+                  >
                     <CircleHelp className="size-3.5 text-cyan" />
                     Come funziona
                   </button>
                   <div className="pointer-events-auto">
-                    <GlowSwitch compact live={tab === "orbit"} value={String(orbitSpeed) as "0.5" | "1" | "2"} onChange={(v) => setOrbitSpeed(Number(v) as OrbitSpeed)} options={[{ id: "0.5", label: "0.5x" }, { id: "1", label: "1x" }, { id: "2", label: "2x" }]} />
+                    <GlowSwitch
+                      compact
+                      live={tab === "orbit"}
+                      value={String(orbitSpeed) as "0.5" | "1" | "2"}
+                      onChange={(v) => setOrbitSpeed(Number(v) as OrbitSpeed)}
+                      options={[
+                        { id: "0.5", label: "0.5x" },
+                        { id: "1", label: "1x" },
+                        { id: "2", label: "2x" },
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
           </div>
-          <div className="absolute inset-0 overflow-hidden" style={{ display: tab === "calendar" ? "block" : "none" }}>
-            <CalendarView subscriptions={subscriptions} onOpen={setDetailId} onQuickFocus={quickFocus} onSettings={openSettings} />
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{ display: tab === "calendar" ? "block" : "none" }}
+          >
+            <CalendarView
+              subscriptions={subscriptions}
+              onOpen={setDetailId}
+              onQuickFocus={quickFocus}
+              onSettings={openSettings}
+            />
           </div>
-          <div className="absolute inset-0 overflow-hidden" style={{ display: tab === "data" ? "block" : "none" }}>
-            <DataView subscriptions={subscriptions} onOpen={setDetailId} onSettings={openSettings} active={tab === "data"} />
+          <div
+            className="absolute inset-0 overflow-hidden"
+            style={{ display: tab === "data" ? "block" : "none" }}
+          >
+            <DataView
+              subscriptions={subscriptions}
+              onOpen={setDetailId}
+              onSettings={openSettings}
+              active={tab === "data"}
+            />
           </div>
         </div>
-        {flash ? <div className="tab-flash pointer-events-none absolute inset-0 z-30" /> : null}
+        {flash ? (
+          <div className="tab-flash pointer-events-none absolute inset-0 z-30" />
+        ) : null}
       </div>
 
       <BottomNav tab={tab} onTab={goTab} onAdd={() => setFormOpen(true)} />
 
       {detail && (
-        <DetailSheet sub={detail} onClose={() => { setDetailId(null); setFocusId(null); }} onSeeOrbit={() => { goTab("orbit"); setFocusId(detail.id); }} />
+        <DetailSheet
+          sub={detail}
+          onClose={() => {
+            setDetailId(null);
+            setFocusId(null);
+          }}
+          onSeeOrbit={() => {
+            goTab("orbit");
+            setFocusId(detail.id);
+          }}
+        />
       )}
 
       {(formOpen || editing) && (
-        <SubForm editing={editing} fromCallout={Boolean(editing)} onClose={() => { setFormOpen(false); setEditId(null); }} onSaved={(id) => { setFormOpen(false); setEditId(null); goTab("orbit"); setFocusId(id); }} />
+        <SubForm
+          editing={editing}
+          fromCallout={Boolean(editing)}
+          onClose={() => {
+            setFormOpen(false);
+            setEditId(null);
+          }}
+          onSaved={() => {
+            setFormOpen(false);
+            setEditId(null);
+          }}
+        />
       )}
 
       <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
       <HowItWorks open={guideOpen} onClose={closeGuide} />
-      <Toaster theme="dark" position="top-center" toastOptions={TOAST_OPTIONS} />
+      <Toaster
+        theme="dark"
+        position="top-center"
+        toastOptions={TOAST_OPTIONS}
+      />
     </div>
   );
 }
@@ -316,7 +446,7 @@ function OrbitIconStrip({
   const scroller = useRef<HTMLDivElement>(null);
   const unit = useRef(0);
   const jumping = useRef(false);
-  const COPIES = items.length <= 4 ? 1 : 5;
+  const COPIES = 1;
 
   useEffect(() => {
     const el = scroller.current;
@@ -355,7 +485,17 @@ function OrbitIconStrip({
   if (!items.length) return null;
   const loop = Array.from({ length: COPIES }, () => items).flat();
   return (
-    <div ref={scroller} data-no-swipe className="icon-strip-scroll mx-auto w-full max-w-[720px] overflow-x-auto overflow-y-visible rounded-full bg-black/40 py-2.5" style={{ touchAction: "pan-x", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+    <div
+      ref={scroller}
+      data-no-swipe
+      className="icon-strip-scroll mx-auto w-full max-w-[720px] overflow-x-auto overflow-y-visible rounded-full bg-black/40 py-2.5"
+      style={{
+        touchAction: "pan-x",
+        WebkitOverflowScrolling: "touch",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+      }}
+    >
       <style>{`
         @keyframes strip-brand-pulse {
           0%, 100% { filter: drop-shadow(0 0 2px var(--strip-glow)); }
@@ -373,10 +513,31 @@ function OrbitIconStrip({
           const spread = [5, 13, 26][step]!;
           const tint = getBrand(s.brandKey).color || "#22d3ee";
           return (
-            <button key={`${s.id}-${i}`} type="button" onClick={() => onPick(s.id)} aria-label={s.name} className={cn("relative size-8 shrink-0 rounded-full", on ? "z-10" : selectedId ? "opacity-30" : "opacity-90")} style={live ? ({ animation: `strip-brand-pulse ${dur}s ease-in-out infinite`, ["--strip-glow"]: tint, ["--strip-spread"]: `${spread}px`, boxShadow: on ? `0 0 0 2px ${tint}` : undefined } as CSSProperties) : undefined}>
+            <button
+              key={`${s.id}-${i}`}
+              type="button"
+              onClick={() => onPick(s.id)}
+              aria-label={s.name}
+              className={cn(
+                "relative size-8 shrink-0 rounded-full",
+                on ? "z-10" : selectedId ? "opacity-30" : "opacity-90",
+              )}
+              style={
+                live
+                  ? ({
+                      animation: `strip-brand-pulse ${dur}s ease-in-out infinite`,
+                      ["--strip-glow"]: tint,
+                      ["--strip-spread"]: `${spread}px`,
+                      boxShadow: on ? `0 0 0 2px ${tint}` : undefined,
+                    } as CSSProperties)
+                  : undefined
+              }
+            >
               <BrandBadge brandKey={s.brandKey} name={s.name} size={32} />
               {days !== null && days <= 7 && days < 9000 && s.frequency !== "once" ? (
-                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-cyan px-1 font-display text-[8px] font-semibold leading-3 text-void">{days === 0 ? "oggi" : `${days}g`}</span>
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-cyan px-1 font-display text-[8px] font-semibold leading-3 text-void">
+                  {days === 0 ? "oggi" : `${days}g`}
+                </span>
               ) : null}
             </button>
           );

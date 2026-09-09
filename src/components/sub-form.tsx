@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -29,15 +29,23 @@ export function SubForm({
 }) {
   const addSubscription = useAppStore((s) => s.addSubscription);
   const updateSubscription = useAppStore((s) => s.updateSubscription);
+  const formDraft = useAppStore((s) => s.formDraft);
+  const setFormDraft = useAppStore((s) => s.setFormDraft);
   const initial = editing ?? emptySubscription();
-  const [name, setName] = useState(initial.name);
-  const [category, setCategory] = useState<CategoryId>(initial.category);
-  const [price, setPrice] = useState(String(initial.price));
-  const [frequency, setFrequency] = useState<Frequency>(initial.frequency);
-  const [startedAt, setStartedAt] = useState(initial.startedAt || initial.nextRenewal);
-  const [brandKey, setBrandKey] = useState(initial.brandKey);
-  const [notes, setNotes] = useState(initial.notes);
-  const [more, setMore] = useState(true);
+  const draft = !editing && formDraft ? formDraft : null;
+  const [name, setName] = useState(draft?.name ?? initial.name);
+  const [category, setCategory] = useState<CategoryId>((draft?.category as CategoryId) ?? initial.category);
+  const [price, setPrice] = useState(draft?.price ?? String(initial.price || ""));
+  const [frequency, setFrequency] = useState<Frequency>((draft?.frequency as Frequency) ?? initial.frequency);
+  const [startedAt, setStartedAt] = useState(draft?.startedAt ?? (initial.startedAt || initial.nextRenewal));
+  const [brandKey, setBrandKey] = useState(draft?.brandKey ?? initial.brandKey);
+  const [notes, setNotes] = useState(draft?.notes ?? initial.notes);
+  const [more, setMore] = useState(false);
+
+  useEffect(() => {
+    if (editing) return;
+    setFormDraft({ name, category, price, frequency, startedAt, brandKey, notes });
+  }, [editing, name, category, price, frequency, startedAt, brandKey, notes, setFormDraft]);
 
   const suggestions = useMemo(() => matchBrands(name), [name]);
   const brand = getBrand(brandKey);
@@ -90,7 +98,8 @@ export function SubForm({
       return;
     }
     const id = addSubscription(payload);
-    toast.success("In orbita");
+    setFormDraft(null);
+    toast.success("Salvato");
     onSaved(id);
   };
 

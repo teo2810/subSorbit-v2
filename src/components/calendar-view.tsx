@@ -15,7 +15,7 @@ import {
 import { it } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { nextOccurrence, occursOnDay } from "@/lib/domain";
+import { duePhrase, nextOccurrence, occursOnDay, upcomingRenewals } from "@/lib/domain";
 import { formatDayLong, formatEuroCompact, formatMonthTitle } from "@/lib/format";
 import { BrandBadge } from "@/lib/logos";
 import { SubCard } from "./sub-card";
@@ -60,6 +60,25 @@ export function CalendarView({
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-36">
         <ScreenHeader onSettings={onSettings} sticky />
         <div className="px-5">
+        <div className="mb-4">
+          <p className="mb-2 font-display text-sm font-medium">Prossime scadenze</p>
+          <div className="space-y-1.5">
+            {upcomingRenewals(subscriptions, 3).map(({ s }) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onOpen(s.id)}
+                className="glow-tap flex w-full items-center gap-2.5 rounded-2xl bg-white/5 px-3 py-2.5 text-left"
+              >
+                <BrandBadge brandKey={s.brandKey} name={s.name} size={28} />
+                <span className="min-w-0 flex-1 truncate text-sm">{s.name}</span>
+                <span className="shrink-0 text-[12px] tabular-nums text-muted">
+                  {formatEuroCompact(s.price)} · {duePhrase(s)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="glass-soft rounded-lg p-3">
           <div className="mb-3 flex items-center justify-between px-1">
             <button
@@ -157,19 +176,23 @@ export function CalendarView({
           </div>
         )}
 
-        <h3 className="mt-2 mb-2 font-display text-sm font-medium">
-          Prossimi rinnovi
-        </h3>
-        <div className="space-y-2">
-          {upcoming.map((s) => (
-            <SubCard
-              key={s.id}
-              sub={s}
-              onOpen={() => onOpen(s.id)}
-              onQuickFocus={() => onQuickFocus(s.id)}
-            />
-          ))}
-        </div>
+        {upcoming.length > 3 ? (
+          <>
+            <h3 className="mt-2 mb-2 font-display text-sm font-medium">
+              Altri rinnovi
+            </h3>
+            <div className="space-y-2">
+              {upcoming.slice(3, 10).map((s) => (
+                <SubCard
+                  key={s.id}
+                  sub={s}
+                  onOpen={() => onOpen(s.id)}
+                  onQuickFocus={() => onQuickFocus(s.id)}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
         </div>
       </div>
     </div>
